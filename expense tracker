@@ -1,0 +1,154 @@
+function setupExpenseSheets() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Check if the "Daily Foods" sheet exists, if not create it
+  var dailyFoodsSheet = spreadsheet.getSheetByName("Daily Foods");
+  if (!dailyFoodsSheet) {
+    dailyFoodsSheet = spreadsheet.insertSheet("Daily Foods");
+  } else {
+    dailyFoodsSheet.clear(); // Clear existing content if the sheet already exists
+  }
+
+  // Check if the "Other Expenses" sheet exists, if not create it
+  var otherExpensesSheet = spreadsheet.getSheetByName("Other Expenses");
+  if (!otherExpensesSheet) {
+    otherExpensesSheet = spreadsheet.insertSheet("Other Expenses");
+  } else {
+    otherExpensesSheet.clear(); // Clear existing content if the sheet already exists
+  }
+
+  // Setup "Daily Foods" Sheet
+  setupSheet(dailyFoodsSheet, 3000);  // Set max budget to 3000 for Daily Foods
+
+  // Setup "Other Expenses" Sheet
+  setupSheet(otherExpensesSheet, 7000);  // Set max budget to 7000 for Other Expenses
+  
+  // Setup "Total Amount" Sheet
+  setupTotalAmountSheet();
+}
+
+function setupSheet(sheet, maxBudget) {
+  // Set the headers and initial max budget
+  sheet.getRange("A1").setValue("Max Budget");
+  sheet.getRange("B1").setValue(maxBudget);
+  sheet.getRange("A2").setValue("Remaining Budget");
+  sheet.getRange("B2").setFormula("=B1-SUM(D3:D)");  // Formula to deduct from max budget
+
+  // Set headers for expenses
+  sheet.getRange("A3").setValue("Date");
+  sheet.getRange("B3").setValue("Time");
+  sheet.getRange("C3").setValue("Description");
+  sheet.getRange("D3").setValue("Price");
+
+  // Set column widths for better visibility
+  sheet.setColumnWidth(1, 100); // Date column
+  sheet.setColumnWidth(2, 100); // Time column
+  sheet.setColumnWidth(3, 200); // Description column
+  sheet.setColumnWidth(4, 100); // Price column
+}
+
+function setupTotalAmountSheet() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var totalAmountSheet = spreadsheet.getSheetByName("Total Amount");
+  if (!totalAmountSheet) {
+    totalAmountSheet = spreadsheet.insertSheet("Total Amount");
+  } else {
+    totalAmountSheet.clear(); // Clear existing content if the sheet already exists
+  }
+
+  // Set up headers
+  totalAmountSheet.getRange("A1").setValue("Total Amount");
+  totalAmountSheet.getRange("B1").setValue(55855); // Initial total amount
+  totalAmountSheet.getRange("A2").setValue("Remaining Amount");
+  totalAmountSheet.getRange("B2").setValue(55855); // Remaining amount initially equal to total amount
+  totalAmountSheet.getRange("A3").setValue("Date");
+  totalAmountSheet.getRange("B3").setValue("Time");
+  totalAmountSheet.getRange("C3").setValue("Expense Amount");
+  totalAmountSheet.getRange("D3").setValue("Source");
+  totalAmountSheet.getRange("E3").setValue("Updated Remaining Amount");
+
+  totalAmountSheet.setColumnWidth(1, 100); // Date column
+  totalAmountSheet.setColumnWidth(2, 100); // Time column
+  totalAmountSheet.setColumnWidth(3, 120); // Expense Amount column
+  totalAmountSheet.setColumnWidth(4, 120);
+  totalAmountSheet.setColumnWidth(5, 170); // Source column
+}
+
+function onEdit(e) {
+  var sheet = e.source.getActiveSheet();
+  var range = e.range;
+
+  // Check if we're in "Daily Foods" or "Other Expenses" sheet
+  if (sheet.getName() === "Daily Foods" || sheet.getName() === "Other Expenses") {
+    // Check if the edit is in the "Price" column (Column D)
+    if (range.getColumn() === 4 && range.getRow() > 3) {
+      // Get the date and time cells corresponding to the edited row
+      var dateCell = sheet.getRange(range.getRow(), 1);
+      var timeCell = sheet.getRange(range.getRow(), 2);
+      
+      // Update date and time with formatting
+      dateCell.setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "MMM d, yyyy"));
+      timeCell.setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "hh:mm:ss a"));
+
+      // Log the expense to the Total Amount sheet
+      logExpenseToTotalAmount(sheet.getName(), range.getValue(), dateCell.getValue(), timeCell.getValue());
+    }
+
+    // Check if an expense was removed
+    if (range.getValue() === "" && range.getRow() > 3) {
+      // Clear date and time if expense is removed
+      var dateCell = sheet.getRange(range.getRow(), 1);
+      var timeCell = sheet.getRange(range.getRow(), 2);
+      dateCell.setValue("");
+      timeCell.setValue("");
+      // Remove corresponding row from Total Amount sheet
+      removeExpenseFromTotalAmount(range.getRow());
+    }
+  }
+}
+
+function logExpenseToTotalAmount(sheetName, expenseAmount, expenseDate, expenseTime) {
+  var totalAmountSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Total Amount");
+  var totalAmountCell = totalAmountSheet.getRange("B1");
+  var remainingAmountCell = totalAmountSheet.getRange("B2");
+  
+  // Fixed total amount
+  var totalAmountValue = totalAmountCell.getValue(); // Total amount should remain fixed
+  var currentRemainingAmount = remainingAmountCell.getValue(); // Current remaining amount
+  
+  // Calculate new remaining amount
+  var newRemainingAmount = currentRemainingAmount - expenseAmount;
+
+  // Log new expense
+  totalAmountSheet.appendRow([expenseDate, expenseTime, expenseAmount, sheetName, newRemainingAmount]);
+
+  // Update remaining amount
+  remainingAmountCell.setValue(newRemainingAmount);
+}
+
+function removeExpenseFromTotalAmount(row) {
+  var totalAmountSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Total Amount");
+  
+  // Update remaining amount after deletion
+  var remainingAmountCell = totalAmountSheet.getRange("B2");
+  var totalAmountValue = totalAmountSheet.getRange("B1").getValue(); // Total amount is fixed
+  
+  // Clear corresponding row
+  var expenseAmount = totalAmountSheet.getRange(row + 2, 3).getValue(); // Get the expense amount being removed
+  totalAmountSheet.deleteRow(row + 2);
+  
+  // Update remaining amount
+  remainingAmountCell.setValue(totalAmountValue - getTotalExpenses(totalAmountSheet));
+}
+
+function getTotalExpenses(sheet) {
+  var data = sheet.getRange("C4:C").getValues(); // Get all expense amounts
+  var totalExpenses = 0;
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][0]) {
+      totalExpenses += data[i][0]; // Accumulate the total
+    }
+  }
+  return totalExpenses;
+}
+
